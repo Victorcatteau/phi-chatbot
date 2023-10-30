@@ -1,5 +1,15 @@
 from langchain.document_loaders import PyPDFLoader
-from langchain.text_splitter import CharacterTextSplitter, RecursiveCharacterTextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from pathlib import Path
+from langchain.schema import Document
+from typing import TypeVar, List
+
+from langchain.vectorstores import FAISS
+from langchain.embeddings.openai import OpenAIEmbeddings
+
+from config import cfg
+
+VST = TypeVar("VST", bound="VectorStore")
 
 data_path = "../ml/data/pdf"
 
@@ -30,3 +40,27 @@ def load_pdfs(path: Path) -> List[Document]:
         )
         docs = text_splitter.split_documents(pages)
     return docs
+
+def generate_embeddings(
+    documents: List[Document], path: Path, faiss_persist_directory: str
+) -> VST:
+    """
+    Receives a list of documents and generates the embeddings via OpenAI API.
+
+    Parameters:
+    documents (List[Document]): The document list with one page per document.
+    path (Path): The path where the documents are found.
+
+    Returns:
+    VST: Recturs a reference to the vector store.
+    """
+    try:
+        docsearch = FAISS.from_documents(documents, cfg.embeddings)
+        docsearch.save_local(cfg.faiss_persist_directory)
+        logger.info("Vector database persisted")
+    except Exception as e:
+        logger.error(f"Failed to process {path}: {str(e)}")
+        if 'docsearch' in vars() or 'docsearch' in globals():
+            docsearch.persist()
+        return docsearch
+    return docsearch
