@@ -11,33 +11,19 @@ from langchain.chains import (
 )
 from langchain.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
-
-os.environ["OPENAI_API_KEY"] = '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'
-
-prompt_template = """Let's think step by step. Use the tone and information of the following pieces of context to answer the question as if the author was answering the question.
-
-{context}
-
-Question: {question}
-Answer:"""
-
-DEFAULT_TEMPLATE = PromptTemplate(
-    template=prompt_template, 
-    input_variables=["context", "question"]
-)
-
-data_path = "data/"
+from prompts.basic_prompt import DEFAULT_TEMPLATE
 
 class Philosopher(BaseModel):
     name: str
     k: int = 4
     template: PromptTemplate = DEFAULT_TEMPLATE
+    data_path: str = "data/"
     temperature: float = 1
 
     def generate_embeddings(self, embeddings):
-        embeddings_path = Path(data_path + "embeddings/"+self.name)
+        embeddings_path = Path(self.data_path + "embeddings/"+self.name)
         if not os.path.exists(embeddings_path):
-            raw_data_path = Path(data_path + "raw/"+self.name)
+            raw_data_path = Path(self.data_path + "raw/"+self.name)
             docs = load_pdfs(raw_data_path)
             docsearch = FAISS.from_documents(docs, embeddings)
             docsearch.save_local(embeddings_path)
