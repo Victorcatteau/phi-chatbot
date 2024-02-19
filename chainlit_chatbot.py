@@ -8,7 +8,7 @@ import chainlit as cl
 from langchain.memory import ChatMessageHistory, ConversationBufferMemory
 from langchain.embeddings.openai import OpenAIEmbeddings
 
-philosophers = ["Nietzsche", "Plato"]
+philosophers = ["Nietzsche", "Plato", "Descartes"]
 
 @cl.on_chat_start
 async def start():
