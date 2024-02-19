@@ -1,76 +1,79 @@
-from pdf_loader import load_pdfs
-
-from langchain.vectorstores import FAISS
-from langchain.embeddings.openai import OpenAIEmbeddings
-import chainlit as cl
-from langchain.chains import RetrievalQAWithSourcesChain
 from typing import Dict, Optional
+import os
 
-@cl.langchain_factory(use_async=True)
-async def init():
+from philosopher import Philosopher
 
-    """
-    Loads the vector data store object and the PDF documents. Creates the QA chain.
-    Sets up some session variables and removes the Chainlit footer.
-    
-    Parameters:
-    use_async (bool): Determines whether async is to be used or not.
+import chainlit as cl
 
-    Returns:
-    RetrievalQAWithSourcesChain: The QA chain
-    """
-    msg = cl.Message(content=f"Processing files. Please wait.")
+from langchain.memory import ChatMessageHistory, ConversationBufferMemory
+from langchain.embeddings.openai import OpenAIEmbeddings
+
+philosophers = ["Nietzsche", "Plato"]
+
+@cl.on_chat_start
+async def start():
+
+    actions = [
+        cl.Action(name = philosopher, value = philosopher, description="Chat with"+philosopher)  for philosopher in philosophers
+    ]
+
+    await cl.Message(content="Choose which philosopher you want to chat with:", actions=actions).send()
+
+@cl.action_callback("action_button")
+async def on_action(action: cl.Action):
+    philosopher_name = action.name
+
+    msg = cl.Message(content=f"Initiating philosopher. Please wait.")
     await msg.send()
-    docsearch, documents = load_embeddings()
+
+    philosopher = Philosopher(name=philosopher_name)
+
+    embeddings = OpenAIEmbeddings(show_progress_bar=True,
+                              chunk_size=5)
     
-    humour = os.getenv("HUMOUR") == "true"
+    docsearch = philosopher.generate_embeddings(embeddings)
+
+    message_history = ChatMessageHistory()
+
+    memory = ConversationBufferMemory(
+        memory_key="chat_history",
+        output_key="answer",
+        chat_memory=message_history,
+        return_messages=True,
+    )
     
-    chain: RetrievalQAWithSourcesChain = create_retrieval_chain(docsearch, humour=humour)
-    metadatas = [d.metadata for d in documents]
-    texts = [d.page_content for d in documents]
-    cl.user_session.set(KEY_META_DATAS, metadatas)
-    cl.user_session.set(KEY_TEXTS, texts)
-    remove_footer()
-    await msg.update(content=f"You can now ask questions about Onepoint HR!")#
+    chain = philosopher.generate_qa_chain(docsearch, memory)
+
+    msg.content = f"`{philosopher.name}` ready. You can now ask questions!"
+    await msg.update()
+
+    cl.user_session.set("chain", chain)
     return chain
 
-@cl.langchain_postprocess
-async def process_response(res) -> cl.Message:
-    """
-    Tries to extract the sources and corresponding texts from the sources.
+@cl.on_message
+async def main(message: cl.Message):
+    print(message)
+    chain = cl.user_session.get("chain")  # type: ConversationalRetrievalChain
+    cb = cl.AsyncLangchainCallbackHandler()
 
-    Parameters:
-    res (dict): A dictionary with the answer and sources provided by the LLM via LangChain.
-    
-    Returns:
-    cl.Message: The message containing the answer and the list of sources with corresponding texts.
-    """
+    res = await chain.acall(message.content, callbacks=[cb])
     answer = res["answer"]
-    sources = res["sources"].strip()
-    source_elements = []
+    source_documents = res["source_documents"]  # type: List[Document]
 
-    # Get the metadata and texts from the user session
-    metadatas = cl.user_session.get(KEY_META_DATAS)
-    all_sources = [m["source"] for m in metadatas]
-    texts = cl.user_session.get(KEY_TEXTS)
+    text_elements = []  # type: List[cl.Text]
 
-    found_sources = []
-    if sources:
-        raw_sources, file_sources = source_splitter(sources)
-        for i, source in enumerate(raw_sources):
-            try:
-                index = all_sources.index(source)
-                text = texts[index]
-                source_name = file_sources[i]
-                found_sources.append(source_name)
-                # Create the text element referenced in the message
-                logger.info(f"Found text in {source_name}")
-                source_elements.append(cl.Text(content=text, name=source_name))
-            except ValueError:
-                continue
-        if found_sources:
-            answer += f"\nSources: {', '.join(found_sources)}"
+    if source_documents:
+        for source_idx, source_doc in enumerate(source_documents):
+            source_name = f"source_{source_idx}"
+            # Create the text element referenced in the message
+            text_elements.append(
+                cl.Text(content=source_doc.page_content, name=source_name)
+            )
+        source_names = [text_el.name for text_el in text_elements]
+
+        if source_names:
+            answer += f"\nSources: {', '.join(source_names)}"
         else:
-            answer += f"\n{sources}"
+            answer += "\nNo sources found"
 
-    await cl.Message(content=answer, elements=source_elements).send()
+    await cl.Message(content=answer, elements=text_elements).send()
